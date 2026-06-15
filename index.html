@@ -215,8 +215,8 @@
   <div class="card">
     <div class="control-row">
       <label for="capital">Capital propio (USDT)</label>
-      <input type="range" id="capital" min="1000" max="50000" step="500" value="10000">
-      <span class="control-out" id="capital-out">$10,000</span>
+      <input type="range" id="capital" min="1000" max="500000" step="1000" value="100000">
+      <span class="control-out" id="capital-out">$100,000</span>
     </div>
 
     <div class="control-row">
@@ -268,6 +268,74 @@
     </div>
   </div>
 
+  <div class="card">
+    <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 1rem;">Retiro mensual y recapitalización</h2>
+
+    <div class="control-row">
+      <label for="withdrawPct">% de la ganancia mensual a retirar</label>
+      <input type="range" id="withdrawPct" min="0" max="100" step="5" value="60">
+      <span class="control-out" id="withdrawPct-out">60%</span>
+    </div>
+
+    <div class="control-row">
+      <label for="numMonths">Meses a simular</label>
+      <input type="range" id="numMonths" min="1" max="24" step="1" value="12">
+      <span class="control-out" id="numMonths-out">12</span>
+    </div>
+
+    <div class="grid" style="margin-top: 1rem;">
+      <div class="metric">
+        <p class="metric-label">% recapitalizado</p>
+        <p class="metric-value" id="recapPct-out">40%</p>
+      </div>
+      <div class="metric">
+        <p class="metric-label">Total retirado</p>
+        <p class="metric-value success" id="totalWithdrawn-out">$0</p>
+      </div>
+      <div class="metric">
+        <p class="metric-label">Capital final (trabajando)</p>
+        <p class="metric-value" id="finalCapital-out">$0</p>
+      </div>
+      <div class="metric">
+        <p class="metric-label">Patrimonio total final</p>
+        <p class="metric-value success" id="totalWealth-out">$0</p>
+        <p class="metric-hint">capital + retirado acumulado</p>
+      </div>
+    </div>
+
+    <div class="chart-container" style="margin-top: 1.5rem;">
+      <canvas id="capitalChart" role="img" aria-label="Gráfico de líneas mostrando la evolución mes a mes del capital de trabajo y del total retirado acumulado"></canvas>
+    </div>
+    <div class="legend" style="margin-top: 12px; margin-bottom: 0;">
+      <span class="legend-item"><span class="legend-swatch" style="background:#4f8ef7;"></span>Capital de trabajo</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#3fbf7f;"></span>Total retirado acumulado</span>
+    </div>
+
+    <div style="overflow-x: auto; margin-top: 1rem;">
+      <table style="width: 100%; font-size: 13px; border-collapse: collapse;" id="monthTable">
+        <thead>
+          <tr style="text-align: right; color: var(--text-secondary);">
+            <th style="text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border);">Mes</th>
+            <th style="padding: 6px 8px; border-bottom: 1px solid var(--border);">Capital inicio</th>
+            <th style="padding: 6px 8px; border-bottom: 1px solid var(--border);">Ganancia</th>
+            <th style="padding: 6px 8px; border-bottom: 1px solid var(--border);">Retiro</th>
+            <th style="padding: 6px 8px; border-bottom: 1px solid var(--border);">Recapitalizado</th>
+            <th style="padding: 6px 8px; border-bottom: 1px solid var(--border);">Capital fin</th>
+          </tr>
+        </thead>
+        <tbody id="monthTableBody"></tbody>
+      </table>
+    </div>
+
+    <p class="footnote" style="margin-top: 1rem;">
+      Cada mes, la ganancia se calcula sobre el capital de trabajo del mes
+      (tasa mensual equivalente derivada del backtest). De esa ganancia, el
+      porcentaje elegido se retira y el resto se suma al capital de trabajo
+      del mes siguiente. El capital retirado no genera más rendimiento en
+      esta simulación.
+    </p>
+  </div>
+
   <p class="footnote">
     Ingresá el PnL %, el drawdown máximo % y el período (en días) de
     cualquier backtest de TradingView con
@@ -308,9 +376,22 @@
   const rateMonthOut = document.getElementById('rateMonth-out');
   const ddOut = document.getElementById('dd-out');
 
+  const withdrawPctEl = document.getElementById('withdrawPct');
+  const numMonthsEl = document.getElementById('numMonths');
+  const withdrawPctOut = document.getElementById('withdrawPct-out');
+  const numMonthsOut = document.getElementById('numMonths-out');
+  const recapPctOut = document.getElementById('recapPct-out');
+  const totalWithdrawnOut = document.getElementById('totalWithdrawn-out');
+  const finalCapitalOut = document.getElementById('finalCapital-out');
+  const totalWealthOut = document.getElementById('totalWealth-out');
+  const monthTableBody = document.getElementById('monthTableBody');
+
   const fmtUSD = (v) => '$' + Math.round(v).toLocaleString('en-US');
 
+  const state = { rateMonthPct: 0, capital: 100000 };
+
   let chart;
+  let capitalChart;
 
   function update() {
     const capital = Number(capitalEl.value);
@@ -336,6 +417,9 @@
     const pnlMonth = pnlTotal / months;
     const rateMonthPct = (basePnlPct * factor) / months;
     const ddPct = baseDdPct * factor;
+
+    state.rateMonthPct = rateMonthPct;
+    state.capital = capital;
     const ddUsd = capital * (ddPct / 100);
 
     pnlTotalOut.textContent = fmtUSD(pnlTotal);
@@ -394,8 +478,113 @@
     }
   }
 
-  [capitalEl, capPctEl, leverageEl, btPnlEl, btDDEl, btDaysEl].forEach(el => el.addEventListener('input', update));
+  function updateSimulation() {
+    const withdrawPct = Number(withdrawPctEl.value);
+    const recapPct = 100 - withdrawPct;
+    const numMonths = Number(numMonthsEl.value);
+    const rate = state.rateMonthPct / 100;
+
+    withdrawPctOut.textContent = withdrawPct + '%';
+    numMonthsOut.textContent = numMonths;
+    recapPctOut.textContent = recapPct + '%';
+
+    let workingCapital = state.capital;
+    let totalWithdrawn = 0;
+
+    const labels = [];
+    const capitalSeries = [];
+    const withdrawnSeries = [];
+
+    let rows = '';
+
+    for (let m = 1; m <= numMonths; m++) {
+      const start = workingCapital;
+      const gain = start * rate;
+      const withdrawAmt = gain > 0 ? gain * (withdrawPct / 100) : 0;
+      const recapAmt = gain - withdrawAmt;
+      const end = start + recapAmt;
+
+      totalWithdrawn += withdrawAmt;
+      workingCapital = Math.max(end, 0);
+
+      labels.push('Mes ' + m);
+      capitalSeries.push(workingCapital);
+      withdrawnSeries.push(totalWithdrawn);
+
+      rows += '<tr>' +
+        '<td style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); color:var(--text-secondary);">' + m + '</td>' +
+        '<td style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-variant-numeric: tabular-nums;">' + fmtUSD(start) + '</td>' +
+        '<td style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-variant-numeric: tabular-nums;" class="' + (gain >= 0 ? 'success' : '') + '">' + fmtUSD(gain) + '</td>' +
+        '<td style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-variant-numeric: tabular-nums;">' + fmtUSD(withdrawAmt) + '</td>' +
+        '<td style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-variant-numeric: tabular-nums;">' + fmtUSD(recapAmt) + '</td>' +
+        '<td style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-variant-numeric: tabular-nums;">' + fmtUSD(workingCapital) + '</td>' +
+        '</tr>';
+    }
+
+    monthTableBody.innerHTML = rows;
+    totalWithdrawnOut.textContent = fmtUSD(totalWithdrawn);
+    finalCapitalOut.textContent = fmtUSD(workingCapital);
+    totalWealthOut.textContent = fmtUSD(workingCapital + totalWithdrawn);
+
+    if (capitalChart) {
+      capitalChart.data.labels = labels;
+      capitalChart.data.datasets[0].data = capitalSeries;
+      capitalChart.data.datasets[1].data = withdrawnSeries;
+      capitalChart.update();
+    } else {
+      capitalChart = new Chart(document.getElementById('capitalChart'), {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Capital de trabajo',
+              data: capitalSeries,
+              borderColor: '#4f8ef7',
+              backgroundColor: 'transparent',
+              tension: 0.2,
+              pointRadius: 0
+            },
+            {
+              label: 'Total retirado acumulado',
+              data: withdrawnSeries,
+              borderColor: '#3fbf7f',
+              backgroundColor: 'transparent',
+              borderDash: [4, 3],
+              tension: 0.2,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ctx.dataset.label + ': ' + fmtUSD(ctx.parsed.y)
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#9a9fad', autoSkip: true, maxRotation: 0 },
+              grid: { display: false }
+            },
+            y: {
+              ticks: { color: '#9a9fad', callback: (v) => '$' + Number(v).toLocaleString('en-US') },
+              grid: { color: '#2a2e38' }
+            }
+          }
+        }
+      });
+    }
+  }
+
+  [capitalEl, capPctEl, leverageEl, btPnlEl, btDDEl, btDaysEl, withdrawPctEl, numMonthsEl].forEach(el => el.addEventListener('input', () => { update(); updateSimulation(); }));
   update();
+  updateSimulation();
 </script>
 </body>
 </html>
