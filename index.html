@@ -194,6 +194,26 @@
 
   <div class="card">
     <div class="control-row">
+      <label for="btPnl">PnL del backtest (%)</label>
+      <input type="number" id="btPnl" step="0.01" value="2002.69" style="flex:1; min-width:0; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:8px 10px; font-size:14px; font-variant-numeric: tabular-nums;">
+      <span class="control-out" id="btPnl-out">2002.69%</span>
+    </div>
+
+    <div class="control-row">
+      <label for="btDD">Drawdown máximo del backtest (%)</label>
+      <input type="number" id="btDD" step="0.01" value="3.87" style="flex:1; min-width:0; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:8px 10px; font-size:14px; font-variant-numeric: tabular-nums;">
+      <span class="control-out" id="btDD-out">3.87%</span>
+    </div>
+
+    <div class="control-row">
+      <label for="btDays">Período cubierto (días)</label>
+      <input type="number" id="btDays" step="1" value="240" style="flex:1; min-width:0; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:8px 10px; font-size:14px; font-variant-numeric: tabular-nums;">
+      <span class="control-out" id="btDays-out">240 d</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="control-row">
       <label for="capital">Capital propio (USDT)</label>
       <input type="range" id="capital" min="1000" max="50000" step="500" value="10000">
       <span class="control-out" id="capital-out">$10,000</span>
@@ -219,12 +239,18 @@
       <p class="metric-hint">vs. 100% equity del backtest</p>
     </div>
     <div class="metric">
-      <p class="metric-label">PnL en 8 meses</p>
-      <p class="metric-value success" id="pnl8-out">$120,100</p>
+      <p class="metric-label">PnL en el período del backtest</p>
+      <p class="metric-value success" id="pnlTotal-out">$120,100</p>
+      <p class="metric-hint" id="pnlTotal-hint">240 días</p>
     </div>
     <div class="metric">
       <p class="metric-label">PnL promedio / mes</p>
       <p class="metric-value success" id="pnlMonth-out">$15,013</p>
+    </div>
+    <div class="metric">
+      <p class="metric-label">Tasa mensual equivalente</p>
+      <p class="metric-value success" id="rateMonth-out">+150.2%</p>
+      <p class="metric-hint">simple, no compuesta</p>
     </div>
     <div class="metric">
       <p class="metric-label">Drawdown máx. histórico</p>
@@ -234,23 +260,25 @@
 
   <div class="card">
     <div class="legend">
-      <span class="legend-item"><span class="legend-swatch" style="background:#4f8ef7;"></span>Drawdown máximo histórico (8 meses)</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#4f8ef7;"></span>Drawdown máximo histórico (período del backtest)</span>
       <span class="legend-item"><span class="legend-swatch" style="background:#e2615a;"></span>Hipotético: 2x el peor histórico</span>
     </div>
     <div class="chart-container">
-      <canvas id="ddChart" role="img" aria-label="Gráfico de barras horizontales mostrando el drawdown máximo histórico de 8 meses y un escenario hipotético de drawdown 2 veces peor, como porcentaje del capital propio"></canvas>
+      <canvas id="ddChart" role="img" aria-label="Gráfico de barras horizontales mostrando el drawdown máximo histórico del backtest y un escenario hipotético de drawdown 2 veces peor, como porcentaje del capital propio"></canvas>
     </div>
   </div>
 
   <p class="footnote">
-    Base: backtest v72, 8 meses reales (nov 2025 &ndash; jun 2026), con
-    <code>default_qty_value=100% equity</code>: PnL +2,002.69% (+$200,269
-    sobre $10,000), drawdown máximo 3.87% (+$3,210).
+    Ingresá el PnL %, el drawdown máximo % y el período (en días) de
+    cualquier backtest de TradingView con
+    <code>default_qty_value=100% equity</code>. Los valores por defecto
+    corresponden al backtest v72 de 8 meses (nov 2025 &ndash; jun 2026):
+    PnL +2,002.69%, drawdown máximo 3.87%, 240 días.
   </p>
   <p class="footnote">
     El factor de escala es (% capital × apalancamiento) / 100. Esto asume
     que el comportamiento porcentual del activo es independiente del tamaño
-    de la posición, dentro de los límites de liquidez de APT. No es
+    de la posición, dentro de los límites de liquidez del activo. No es
     asesoría financiera; los resultados pasados no garantizan resultados
     futuros, y el drawdown máximo futuro puede superar el histórico.
   </p>
@@ -259,9 +287,12 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-  const BASE_PNL_PCT = 2002.69;
-  const BASE_DD_PCT = 3.87;
-  const MONTHS = 8;
+  const btPnlEl = document.getElementById('btPnl');
+  const btDDEl = document.getElementById('btDD');
+  const btDaysEl = document.getElementById('btDays');
+  const btPnlOut = document.getElementById('btPnl-out');
+  const btDDOut = document.getElementById('btDD-out');
+  const btDaysOut = document.getElementById('btDays-out');
 
   const capitalEl = document.getElementById('capital');
   const capPctEl = document.getElementById('capPct');
@@ -271,8 +302,10 @@
   const capPctOut = document.getElementById('capPct-out');
   const leverageOut = document.getElementById('leverage-out');
   const factorOut = document.getElementById('factor-out');
-  const pnl8Out = document.getElementById('pnl8-out');
+  const pnlTotalOut = document.getElementById('pnlTotal-out');
+  const pnlTotalHint = document.getElementById('pnlTotal-hint');
   const pnlMonthOut = document.getElementById('pnlMonth-out');
+  const rateMonthOut = document.getElementById('rateMonth-out');
   const ddOut = document.getElementById('dd-out');
 
   const fmtUSD = (v) => '$' + Math.round(v).toLocaleString('en-US');
@@ -284,20 +317,31 @@
     const capPct = Number(capPctEl.value);
     const leverage = Number(leverageEl.value);
 
+    const basePnlPct = Number(btPnlEl.value) || 0;
+    const baseDdPct = Number(btDDEl.value) || 0;
+    const days = Number(btDaysEl.value) || 1;
+    const months = days / 30;
+
     capitalOut.textContent = fmtUSD(capital);
     capPctOut.textContent = capPct + '%';
     leverageOut.textContent = leverage + 'x';
+    btPnlOut.textContent = basePnlPct.toFixed(2) + '%';
+    btDDOut.textContent = baseDdPct.toFixed(2) + '%';
+    btDaysOut.textContent = days + ' d';
 
     const factor = (capPct / 100) * leverage;
     factorOut.textContent = factor.toFixed(2) + 'x';
 
-    const pnl8 = capital * (BASE_PNL_PCT / 100) * factor;
-    const pnlMonth = pnl8 / MONTHS;
-    const ddPct = BASE_DD_PCT * factor;
+    const pnlTotal = capital * (basePnlPct / 100) * factor;
+    const pnlMonth = pnlTotal / months;
+    const rateMonthPct = (basePnlPct * factor) / months;
+    const ddPct = baseDdPct * factor;
     const ddUsd = capital * (ddPct / 100);
 
-    pnl8Out.textContent = fmtUSD(pnl8);
+    pnlTotalOut.textContent = fmtUSD(pnlTotal);
+    pnlTotalHint.textContent = days + (days === 1 ? ' día' : ' días');
     pnlMonthOut.textContent = fmtUSD(pnlMonth);
+    rateMonthOut.textContent = (rateMonthPct >= 0 ? '+' : '') + rateMonthPct.toFixed(1) + '%';
     ddOut.textContent = fmtUSD(ddUsd) + ' (' + ddPct.toFixed(1) + '%)';
 
     const ddPct2x = ddPct * 2;
@@ -350,7 +394,7 @@
     }
   }
 
-  [capitalEl, capPctEl, leverageEl].forEach(el => el.addEventListener('input', update));
+  [capitalEl, capPctEl, leverageEl, btPnlEl, btDDEl, btDaysEl].forEach(el => el.addEventListener('input', update));
   update();
 </script>
 </body>
